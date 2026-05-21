@@ -1,7 +1,6 @@
 import os
 import logging
-import asyncio
-from telegram import Update, Bot
+from telegram import Update
 from telegram.ext import Application, MessageHandler, CommandHandler, filters, ContextTypes
 from telegram.constants import ChatAction
 from agents.registry import AGENTS
@@ -18,20 +17,20 @@ history = ConversationHistory()
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    lines = ["👋 *Виртуальный офис запущен!*\n", "Упомяните агента, чтобы он ответил:\n"]
+    lines = ["<b>Виртуальный офис запущен!</b>\n", "Упомяните агента, чтобы он ответил:\n"]
     for agent in AGENTS.values():
         lines.append(f"{agent['avatar']} @{agent['username']} — {agent['role']}")
-    lines.append("\nПример: `@pm_agent Составь план спринта`")
-    await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+    lines.append("\nПример: <code>@pm_agent Составь план спринта</code>")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 
 async def agents_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    lines = ["🏢 *Команда виртуального офиса:*\n"]
+    lines = ["<b>Команда виртуального офиса:</b>\n"]
     for agent in AGENTS.values():
-        lines.append(f"{agent['avatar']} *{agent['name']}* (@{agent['username']})")
+        lines.append(f"{agent['avatar']} <b>{agent['name']}</b> (@{agent['username']})")
         lines.append(f"   {agent['role']}")
-        lines.append(f"   _{agent['description']}_\n")
-    await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+        lines.append(f"   <i>{agent['description']}</i>\n")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -44,7 +43,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = message.text
     entities = message.entities or []
 
-    # Find mentioned agents
     mentioned_agents = []
     for entity in entities:
         if entity.type == "mention":
@@ -58,21 +56,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not mentioned_agents:
         return
 
-    # Clean text: remove all @mentions from user message
     clean_text = text
     for entity in sorted(entities, key=lambda e: e.offset, reverse=True):
         if entity.type == "mention":
-            clean_text = clean_text[: entity.offset] + clean_text[entity.offset + entity.length :]
+            clean_text = clean_text[: entity.offset] + clean_text[entity.offset + entity.length:]
     clean_text = clean_text.strip()
 
     if not clean_text:
         clean_text = "Привет! Представься и расскажи, чем можешь помочь команде."
 
-    # Reply from each mentioned agent
     for agent_id, agent in mentioned_agents:
         await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
 
-        # Build context: who else is in the team
         team_context = "Ты работаешь в виртуальном офисе вместе с:\n"
         for other_id, other in AGENTS.items():
             if other_id != agent_id:
@@ -87,7 +82,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 user_message=f"{user.first_name}: {clean_text}",
             )
             history.add(chat_id, agent_id, user_message=f"{user.first_name}: {clean_text}", assistant_message=reply)
-            await message.reply_text(f"{agent['avatar']} *{agent['name']}*\n{reply}", parse_mode="Markdown")
+            safe_reply = reply.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            await message.reply_text(
+                f"{agent['avatar']} <b>{agent['name']}</b>\n{safe_reply}",
+                parse_mode="HTML"
+            )
         except Exception as e:
             logger.error(f"Error from agent {agent_id}: {e}")
             await message.reply_text(f"{agent['avatar']} {agent['name']} сейчас недоступен. Попробуй позже.")
@@ -96,7 +95,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def clear_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.message.chat_id
     history.clear(chat_id)
-    await update.message.reply_text("🗑️ История разговоров очищена.")
+    await update.message.reply_text("История разговоров очищена.")
 
 
 def main():
@@ -117,3 +116,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
