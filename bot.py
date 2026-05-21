@@ -1,7 +1,7 @@
 import os
 import logging
-from telegram import Update
-from telegram.ext import Application, MessageHandler, CommandHandler, filters, ContextTypes
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, MessageHandler, CommandHandler, CallbackQueryHandler, filters, ContextTypes
 from telegram.constants import ChatAction
 from agents.registry import AGENTS
 from utils.history import ConversationHistory
@@ -15,22 +15,75 @@ logger = logging.getLogger(__name__)
 
 history = ConversationHistory()
 
+# Store selected agent per chat: {chat_id: agent_id}
+selected_agent = {}
+
+
+def make_agent_keyboard(current=None):
+    buttons = []
+    row = []
+    for agent_id, agent in AGENTS.items():
+        mark = " ✅" if agent_id == current else ""
+        row.append(InlineKeyboardButton(
+            f"{agent['avatar']} {agent['name']}{mark}",
+            callback_data=f"select:{agent_id}"
+        ))
+        if len(row) == 2:
+            buttons.append(row)
+            row = []
+    if row:
+        buttons.append(row)
+    return InlineKeyboardMarkup(buttons)
+
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    lines = ["<b>Виртуальный офис запущен!</b>\n", "Упомяните агента, чтобы он ответил:\n"]
-    for agent in AGENTS.values():
-        lines.append(f"{agent['avatar']} @{agent['username']} — {agent['role']}")
-    lines.append("\nПример: <code>@pm_agent Составь план спринта</code>")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    text = (
+        "<b>Виртуальный офис запущен!</b>\n\n"
+        "Выберите агента кнопкой ниже и просто пишите сообщения — "
+        "не нужно упоминать @ каждый раз.\n\n"
+        "Или упомяните агента напрямую: <code>@pm_agent привет</code>"
+    )
+    await update.message.reply_text(
+        text,
+        parse_mode="HTML",
+        reply_markup=make_agent_keyboard()
+    )
 
 
 async def agents_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    lines = ["<b>Команда виртуального офиса:</b>\n"]
-    for agent in AGENTS.values():
-        lines.append(f"{agent['avatar']} <b>{agent['name']}</b> (@{agent['username']})")
-        lines.append(f"   {agent['role']}")
-        lines.append(f"   <i>{agent['description']}</i>\n")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    chat_id = update.message.chat_id
+    current = selected_agent.get(chat_id)
+    text = "<b>Выберите агента:</b>"
+    if current and current in AGENTS:
+        a = AGENTS[current]
+        text += f"\n\nСейчас активен: {a['avatar']} <b>{a['name']}</b> ({a['role']})"
+    await update.message.reply_text(
+        text,
+        parse_mode="HTML",
+        reply_markup=make_agent_keyboard(current)
+    )
+
+
+async def select_agent_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    agent_id = query.data.split(":")[1]
+    chat_id = query.message.chat_id
+
+    if agent_id not in AGENTS:
+        return
+
+    selected_agent[chat_id] = agent_id
+    agent = AGENTS[agent_id]
+
+    await query.edit_message_text(
+        f"{agent['avatar']} <b>{agent['name']}</b> выбран!\n"
+        f"<i>{agent['role']} — {agent['description']}</i>\n\n"
+        f"Просто напишите сообщение — отвечу без @ упоминания.",
+        parse_mode="HTML",
+        reply_markup=make_agent_keyboard(agent_id)
+    )
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -43,6 +96,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = message.text
     entities = message.entities or []
 
+    # Check for @mentions first
     mentioned_agents = []
     for entity in entities:
         if entity.type == "mention":
@@ -53,9 +107,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     mentioned_agents.append((agent_id, agent))
                     break
 
+    # If no mention — use selected agent
     if not mentioned_agents:
-        return
+        current = selected_agent.get(chat_id)
+        if current and current in AGENTS:
+            mentioned_agents = [(current, AGENTS[current])]
+        else:
+            # No agent selected — show keyboard
+            await message.reply_text(
+                "Выберите агента с которым хотите общаться:",
+                reply_markup=make_agent_keyboard()
+            )
+            return
 
+    # Clean @mentions from text
     clean_text = text
     for entity in sorted(entities, key=lambda e: e.offset, reverse=True):
         if entity.type == "mention":
@@ -63,7 +128,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     clean_text = clean_text.strip()
 
     if not clean_text:
-        clean_text = "Привет! Представься и расскажи, чем можешь помочь команде."
+        clean_text = "Привет! Представься и расскажи, чем можешь помочь."
 
     for agent_id, agent in mentioned_agents:
         await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
@@ -83,19 +148,30 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             history.add(chat_id, agent_id, user_message=f"{user.first_name}: {clean_text}", assistant_message=reply)
             safe_reply = reply.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+            # Show agent selector after reply
+            current = selected_agent.get(chat_id)
             await message.reply_text(
                 f"{agent['avatar']} <b>{agent['name']}</b>\n{safe_reply}",
-                parse_mode="HTML"
+                parse_mode="HTML",
+                reply_markup=make_agent_keyboard(current)
             )
         except Exception as e:
             logger.error(f"Error from agent {agent_id}: {e}")
-            await message.reply_text(f"{agent['avatar']} {agent['name']} сейчас недоступен. Попробуй позже.")
+            await message.reply_text(
+                f"{agent['avatar']} {agent['name']} сейчас недоступен. Попробуй позже.",
+                reply_markup=make_agent_keyboard(selected_agent.get(chat_id))
+            )
 
 
 async def clear_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.message.chat_id
     history.clear(chat_id)
-    await update.message.reply_text("История разговоров очищена.")
+    selected_agent.pop(chat_id, None)
+    await update.message.reply_text(
+        "История очищена, агент сброшен.",
+        reply_markup=make_agent_keyboard()
+    )
 
 
 def main():
@@ -103,11 +179,17 @@ def main():
     if not token:
         raise ValueError("TELEGRAM_BOT_TOKEN not set")
 
-    app = Application.builder().token(token).build()
+    app = (
+        Application.builder()
+        .token(token)
+        .drop_pending_updates(True)
+        .build()
+    )
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("agents", agents_list))
     app.add_handler(CommandHandler("clear", clear_history))
+    app.add_handler(CallbackQueryHandler(select_agent_callback, pattern="^select:"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     logger.info("Bot started...")
