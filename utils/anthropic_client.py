@@ -52,12 +52,18 @@ async def ask_agent(system_prompt: str, history: list, user_message: str) -> str
     for attempt in range(3):
         try:
             data = await loop.run_in_executor(None, do_request)
-            return data["choices"][0]["message"]["content"]
-        except urllib.error.HTTPError as e:
-            if e.code == 429 and attempt < 2:
+            content = data["choices"][0]["message"]["content"]
+            if not content:
+                raise ValueError("Empty response from model")
+            return content
+        except (urllib.error.HTTPError, ValueError) as e:
+            if isinstance(e, urllib.error.HTTPError) and e.code == 429 and attempt < 2:
                 wait = 15 * (attempt + 1)
                 logger.info(f"Rate limited, waiting {wait}s (attempt {attempt+1}/3)...")
                 await asyncio.sleep(wait)
+            elif isinstance(e, ValueError) and attempt < 2:
+                logger.info(f"Empty response, retrying (attempt {attempt+1}/3)...")
+                await asyncio.sleep(5)
             else:
                 raise
 
