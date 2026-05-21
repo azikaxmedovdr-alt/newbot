@@ -2,27 +2,29 @@ import os
 import json
 import urllib.request
 
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
+DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY")
+DEEPSEEK_URL = "https://api.deepseek.com/chat/completions"
 
 
 async def ask_agent(system_prompt: str, history: list, user_message: str) -> str:
-    contents = []
+    messages = [{"role": "system", "content": system_prompt}]
     for msg in history:
-        role = "user" if msg["role"] == "user" else "model"
-        contents.append({"role": role, "parts": [{"text": msg["content"]}]})
-    contents.append({"role": "user", "parts": [{"text": user_message}]})
+        messages.append({"role": msg["role"], "content": msg["content"]})
+    messages.append({"role": "user", "content": user_message})
 
     body = json.dumps({
-        "system_instruction": {"parts": [{"text": system_prompt}]},
-        "contents": contents,
-        "generationConfig": {"maxOutputTokens": 1024}
+        "model": "deepseek-chat",
+        "messages": messages,
+        "max_tokens": 1024
     }).encode("utf-8")
 
     req = urllib.request.Request(
-        GEMINI_URL,
+        DEEPSEEK_URL,
         data=body,
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {DEEPSEEK_API_KEY}"
+        },
         method="POST"
     )
 
@@ -34,5 +36,5 @@ async def ask_agent(system_prompt: str, history: list, user_message: str) -> str
             return json.loads(resp.read().decode("utf-8"))
 
     data = await loop.run_in_executor(None, do_request)
-    return data["candidates"][0]["content"]["parts"][0]["text"]
+    return data["choices"][0]["message"]["content"]
 
