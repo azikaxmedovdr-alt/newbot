@@ -7,16 +7,15 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
-GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
+OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 
 async def ask_agent(system_prompt: str, history: list, user_message: str) -> str:
-    if not GROQ_API_KEY:
-        raise ValueError("GROQ_API_KEY is not set!")
+    if not OPENROUTER_API_KEY:
+        raise ValueError("OPENROUTER_API_KEY is not set!")
 
-    logger.info(f"GROQ_API_KEY starts with: {GROQ_API_KEY[:8]}...")
-    logger.info(f"Sending request to Groq, history length: {len(history)}")
+    logger.info(f"Key starts with: {OPENROUTER_API_KEY[:8]}...")
 
     messages = [{"role": "system", "content": system_prompt}]
     for msg in history:
@@ -24,17 +23,19 @@ async def ask_agent(system_prompt: str, history: list, user_message: str) -> str
     messages.append({"role": "user", "content": user_message})
 
     body = json.dumps({
-        "model": "llama-3.3-70b-versatile",
+        "model": "meta-llama/llama-3.3-70b-instruct:free",
         "messages": messages,
         "max_tokens": 1024
     }).encode("utf-8")
 
     req = urllib.request.Request(
-        GROQ_URL,
+        OPENROUTER_URL,
         data=body,
         headers={
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {GROQ_API_KEY}"
+            "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+            "HTTP-Referer": "https://virtual-office-bot.railway.app",
+            "X-Title": "Virtual Office Bot"
         },
         method="POST"
     )
@@ -45,7 +46,7 @@ async def ask_agent(system_prompt: str, history: list, user_message: str) -> str
                 return json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as e:
             body = e.read().decode("utf-8")
-            logger.error(f"Groq HTTP {e.code}: {body}")
+            logger.error(f"OpenRouter HTTP {e.code}: {body}")
             raise
 
     loop = asyncio.get_event_loop()
