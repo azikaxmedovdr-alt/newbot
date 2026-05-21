@@ -179,12 +179,7 @@ def main():
     if not token:
         raise ValueError("TELEGRAM_BOT_TOKEN not set")
 
-    app = (
-        Application.builder()
-        .token(token)
-        .drop_pending_updates(True)
-        .build()
-    )
+    app = Application.builder().token(token).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("agents", agents_list))
