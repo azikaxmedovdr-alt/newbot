@@ -2,8 +2,8 @@ import os
 import json
 import urllib.request
 
-DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY")
-DEEPSEEK_URL = "https://api.deepseek.com/chat/completions"
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
+GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 
 async def ask_agent(system_prompt: str, history: list, user_message: str) -> str:
@@ -13,17 +13,17 @@ async def ask_agent(system_prompt: str, history: list, user_message: str) -> str
     messages.append({"role": "user", "content": user_message})
 
     body = json.dumps({
-        "model": "deepseek-chat",
+        "model": "llama-3.3-70b-versatile",
         "messages": messages,
         "max_tokens": 1024
     }).encode("utf-8")
 
     req = urllib.request.Request(
-        DEEPSEEK_URL,
+        GROQ_URL,
         data=body,
         headers={
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {DEEPSEEK_API_KEY}"
+            "Authorization": f"Bearer {GROQ_API_KEY}"
         },
         method="POST"
     )
